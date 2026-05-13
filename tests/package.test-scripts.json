@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:semantic": "vitest run tests/semantic",
+    "test:reports": "vitest run tests/reports",
+    "test:smoke": "vitest run tests/smoke",
+    "test:regression": "vitest run tests/regression",
+    "coverage": "vitest run --coverage"
+  }
+}

@@ -1,0 +1,57 @@
+name: IVPC CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  validate:
+    name: Validate Project
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Run semantic tests
+        run: npm run test:semantic
+
+      - name: Run report tests
+        run: npm run test:reports
+
+      - name: Run smoke tests
+        run: npm run test:smoke
+
+      - name: Run regression tests
+        run: npm run test:regression
+
+      - name: Coverage
+        run: npm run coverage

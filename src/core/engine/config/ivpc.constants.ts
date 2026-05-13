@@ -1,0 +1,12 @@
+export const IVPC_CONSTANTS = {
+  BLIND_SPOT_DISTANCE_KM: 10,
+
+  NORMALIZATION: {
+    MIN: 0,
+    MAX: 1
+  },
+
+  METRICS: {
+    MAX_PERCENT_ERROR: 0.01
+  }
+};

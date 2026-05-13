@@ -1,0 +1,5 @@
+{
+  "name": "Remix: HydroData - Monitoramento Hidrológico",
+  "description": "App para extração e armazenamento de dados hidrológicos do Google Earth Engine.",
+  "requestFramePermissions": []
+}
