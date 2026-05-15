@@ -71,6 +71,39 @@ export async function runIVPCPipeline(
 
   /*
   =====================================================
+  VALIDAÇÃO E SANITIZAÇÃO DE DADOS
+  =====================================================
+
+  REGRA: blindSpotArea NUNCA pode exceder eligibleArea
+  - Se ocorrer, significa dados inválidos
+  - Corrigir: clamp blindSpotArea ≤ eligibleArea
+  - Recalcular percentual após sanitização
+  */
+
+  let sanitizedBlindSpotArea =
+    urbanBlindSpotArea;
+
+  if (
+    sanitizedBlindSpotArea >
+    urbanEligibleArea
+  ) {
+    // Sanitizar: blind spot não pode exceder área elegível
+    sanitizedBlindSpotArea =
+      urbanEligibleArea;
+  }
+
+  // Recalcular percentual após sanitização
+  let sanitizedBlindSpotPercentage =
+    blindSpotPercentage;
+
+  if (urbanEligibleArea > 0) {
+    sanitizedBlindSpotPercentage =
+      (sanitizedBlindSpotArea /
+        urbanEligibleArea) * 100;
+  }
+
+  /*
+  =====================================================
   UNIVERSOS ESTATÍSTICOS
   =====================================================
 
@@ -89,7 +122,7 @@ export async function runIVPCPipeline(
   const urbanMonitoredArea =
     Math.max(
       urbanTotalArea -
-      urbanBlindSpotArea,
+      sanitizedBlindSpotArea,
       0
     );
 
@@ -103,7 +136,7 @@ export async function runIVPCPipeline(
 
   const totalCoveragePercentage =
     monitoredPercentage +
-    blindSpotPercentage;
+    sanitizedBlindSpotPercentage;
 
   /*
   =====================================================
@@ -123,7 +156,7 @@ export async function runIVPCPipeline(
       urbanMonitoredArea,
 
     blindSpotUrbanAreaKm2:
-      urbanBlindSpotArea
+      sanitizedBlindSpotArea
   });
 
   /*
@@ -155,7 +188,7 @@ export async function runIVPCPipeline(
         urbanMonitoredArea,
 
       blindSpotUrbanAreaKm2:
-        urbanBlindSpotArea
+        sanitizedBlindSpotArea
     },
 
     metrics: {
@@ -164,9 +197,11 @@ export async function runIVPCPipeline(
 
       urbanEligibleArea,
 
-      urbanBlindSpotArea,
+      urbanBlindSpotArea:
+        sanitizedBlindSpotArea,
 
-      blindSpotPercentage,
+      blindSpotPercentage:
+        sanitizedBlindSpotPercentage,
 
       monitoredPercentage,
 
@@ -205,10 +240,10 @@ export async function runIVPCPipeline(
     exposure: {
 
       operationalDeficiency:
-        blindSpotPercentage,
+        sanitizedBlindSpotPercentage,
 
       blindSpotArea:
-        urbanBlindSpotArea,
+        sanitizedBlindSpotArea,
 
       monitoredArea:
         urbanMonitoredArea
