@@ -106,97 +106,145 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
     setSocialMapTileUrl(null);
     setIsProcessing(true);
 
-    const { data, error } = await supabase
-      .from('analise_ivpc')
-      .select('*')
-      .eq('bacia_id', selectedBaciaMetadata.id)
-      .single();
+    try {
+      // ✅ Adicionar timeout na query (máx 10 segundos)
+      const queryPromise = supabase
+        .from('analise_ivpc')
+        .select('*')
+        .eq('bacia_id', selectedBaciaMetadata.id)
+        .single();
 
-    let dataToUse = validateAnalysis(data);
-    const pipelineResult =
-      await runIVPCPipeline(dataToUse);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout: Supabase query demorou mais de 10s')), 10000)
+      );
 
-    if (error || !data) {
-      if (ivpcResultData?.stats) {
-        // Mock data context since DB fetch failed
-        dataToUse = {
-          area_total_km2: ivpcResultData.stats.areaTotal,
-          area_urbana_risco_km2: ivpcResultData.stats.urbanEligibleArea,
-          area_ponto_cego_km2: ivpcResultData.stats.urbanBlindSpotArea,
-          porcentagem_risco: ivpcResultData.stats.urbanTotalArea > 0 ? (ivpcResultData.stats.urbanBlindSpotArea / ivpcResultData.stats.urbanTotalArea) * 100 : 0,
-          distancia_max_km: ivpcResultData.stats.distMax / 1000,
-          pop_total_ponto_cego: ivpcResultData.stats.popTotalPontoCego,
-          pop_idosos_criancas_risco: ivpcResultData.stats.popIdososCriancas,
-          ivpc_socioambiental: ivpcResultData.stats.ivpcSocioambiental,
-          modo_metodologico: ivpcResultData.modoMetodologico,
-          url_asset_mapa_social: ivpcResultData.socialUrlFormat || ''
-        };
-      } else {
-        setErrorStatus("A Análise IVPC ainda não foi gerada para esta bacia. Por favor, volte à aba 'Nova Extração' e realize a extração de dados para calcular o índice.");
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]) as any;
+
+      // ✅ Verificar erro PRIMEIRO (antes de tentar validar)
+      if (error || !data) {
+        console.warn("Query retornou vazio ou erro:", error);
+        
+        if (ivpcResultData?.stats) {
+          console.log("Usando fallback com ivpcResultData");
+          // Mock data context since DB fetch failed
+          const dataToUse = {
+            area_total_km2: ivpcResultData.stats.areaTotal,
+            area_urbana_risco_km2: ivpcResultData.stats.urbanEligibleArea,
+            area_ponto_cego_km2: ivpcResultData.stats.urbanBlindSpotArea,
+            porcentagem_risco: ivpcResultData.stats.urbanTotalArea > 0 ? (ivpcResultData.stats.urbanBlindSpotArea / ivpcResultData.stats.urbanTotalArea) * 100 : 0,
+            distancia_max_km: ivpcResultData.stats.distMax / 1000,
+            pop_total_ponto_cego: ivpcResultData.stats.popTotalPontoCego,
+            pop_idosos_criancas_risco: ivpcResultData.stats.popIdososCriancas,
+            ivpc_socioambiental: ivpcResultData.stats.ivpcSocioambiental,
+            modo_metodologico: ivpcResultData.modoMetodologico,
+            url_asset_mapa_social: ivpcResultData.socialUrlFormat || ''
+          };
+          
+          setAnalisePrecalculada(dataToUse);
+          await processarPipeline(dataToUse, null);
+        } else {
+          setErrorStatus("A Análise IVPC ainda não foi gerada para esta bacia. Por favor, volte à aba 'Nova Extração' e realize a extração de dados para calcular o índice.");
+          setIsProcessing(false);
+        }
+        return;
+      }
+
+      // ✅ Só chegar aqui se data NÃO é null
+      console.log("Dados recebidos do Supabase:", data);
+      
+      let dataToUse;
+      try {
+        dataToUse = validateAnalysis(data);
+      } catch (validationError) {
+        console.error("Erro na validação dos dados:", validationError);
+        setErrorStatus("Erro ao validar dados do banco de dados. Verifique se estão completos.");
         setIsProcessing(false);
         return;
       }
+
+      setAnalisePrecalculada(dataToUse);
+      await processarPipeline(dataToUse, data);
+
+    } catch (err) {
+      console.error("Erro na busca/processamento:", err);
+      setErrorStatus(`Erro ao processar análise: ${err instanceof Error ? err.message : String(err)}`);
+      setIsProcessing(false);
     }
+  };
 
-    setAnalisePrecalculada(dataToUse);
-    
+  // ✅ Extrair lógica de processamento em função separada
+  const processarPipeline = async (dataToUse: RawAnalysisInput, data: any) => {
+    try {
+      console.log("Iniciando pipeline IVPC...");
+      const startTime = performance.now();
+      
+      const pipelineResult = await runIVPCPipeline(dataToUse);
+      
+      const endTime = performance.now();
+      console.log(`Pipeline concluído em ${(endTime - startTime).toFixed(2)}ms`);
 
-    const metrics =
-      pipelineResult.metrics;
-    
-      const ivpc =
-        pipelineResult.ivpc;
+      const metrics = pipelineResult.metrics;
+      const ivpc = pipelineResult.ivpc;
 
-    // Gera o relatório
-    const textoRelatorio = gerarRelatorioIVPC({
-      nomeBacia: selectedBaciaMetadata.nome_bacia,
-      areaTotalKm2: metrics.areaTotalKm2, //dataToUse.area_total_km2,
-      areaUrbanaRiscoKm2: ivpcResultData?.stats?.urbanEligibleArea || metrics.urbanEligibleArea, //dataToUse.area_urbana_risco_km2,
-      areaPontoCegoKm2: ivpcResultData?.stats?.urbanBlindSpotArea || metrics.urbanBlindSpotArea, //dataToUse.area_ponto_cego_km2,
-      porcentagemRisco: ivpcResultData?.stats ? (ivpcResultData.stats.urbanTotalArea > 0 ? (ivpcResultData.stats.urbanBlindSpotArea / ivpcResultData.stats.urbanTotalArea) * 100 : 0) : metrics.blindSpotPercentage, //dataToUse.porcentagem_risco,
-      urbanTotalArea: ivpcResultData?.stats?.urbanTotalArea,
-      urbanMonitoredArea: ivpcResultData?.stats?.urbanMonitoredArea,
-      urbanBlindSpotArea: ivpcResultData?.stats?.urbanBlindSpotArea,
-      urbanEligibleArea: ivpcResultData?.stats?.urbanEligibleArea,
-      distanciaMaxKm: metrics.maxDistanceKm, //dataToUse.distancia_max_km,
-      popTotalPontoCego: metrics.populationBlindSpot, //dataToUse.pop_total_ponto_cego,
-      popIdososCriancasRisco: metrics.vulnerablePopulation, //dataToUse.pop_idosos_criancas_risco,
-      domSemSaneamento: dataToUse.pop_total_ponto_cego ? Math.floor(dataToUse.pop_total_ponto_cego / 3 * 0.15) : 0,
-      ivpcSocioambiental: ivpc.value, //dataToUse.ivpc_socioambiental,
-      modoMetodologico: dataToUse.modo_metodologico,
-      qtdEstacoes: ivpcResultData?.stats?.qtdEstacoes,
-      mapUrls: ivpcResultData?.mapUrls
-    });
+      console.log("Gerando relatório...");
+      const reportStartTime = performance.now();
 
+      // Gera o relatório
+      const textoRelatorio = gerarRelatorioIVPC({
+        nomeBacia: selectedBaciaMetadata.nome_bacia,
+        areaTotalKm2: metrics.areaTotalKm2,
+        areaUrbanaRiscoKm2: ivpcResultData?.stats?.urbanEligibleArea || metrics.urbanEligibleArea,
+        areaPontoCegoKm2: ivpcResultData?.stats?.urbanBlindSpotArea || metrics.urbanBlindSpotArea,
+        porcentagemRisco: ivpcResultData?.stats ? (ivpcResultData.stats.urbanTotalArea > 0 ? (ivpcResultData.stats.urbanBlindSpotArea / ivpcResultData.stats.urbanTotalArea) * 100 : 0) : metrics.blindSpotPercentage,
+        urbanTotalArea: ivpcResultData?.stats?.urbanTotalArea,
+        urbanMonitoredArea: ivpcResultData?.stats?.urbanMonitoredArea,
+        urbanBlindSpotArea: ivpcResultData?.stats?.urbanBlindSpotArea,
+        urbanEligibleArea: ivpcResultData?.stats?.urbanEligibleArea,
+        distanciaMaxKm: metrics.maxDistanceKm,
+        popTotalPontoCego: metrics.populationBlindSpot,
+        popIdososCriancasRisco: metrics.vulnerablePopulation,
+        domSemSaneamento: dataToUse.pop_total_ponto_cego ? Math.floor(dataToUse.pop_total_ponto_cego / 3 * 0.15) : 0,
+        ivpcSocioambiental: ivpc.value,
+        modoMetodologico: dataToUse.modo_metodologico,
+        qtdEstacoes: ivpcResultData?.stats?.qtdEstacoes,
+        mapUrls: ivpcResultData?.mapUrls
+      });
 
-    setReport(textoRelatorio);
-    setErrorStatus("");
-    setIsProcessing(false);
+      const reportEndTime = performance.now();
+      console.log(`Relatório gerado em ${(reportEndTime - reportStartTime).toFixed(2)}ms`);
 
-    if (data.asset_id && !data.asset_id.includes('SEU-USUARIO')) {
-      try {
-        const res = await fetch('/api/analise/asset-layer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assetId: data.asset_id })
-        });
-        const cType = res.headers.get("content-type");
-        if (cType && cType.indexOf("application/json") !== -1) {
-          const resData = await res.json();
-          if (resData.urlFormat) {
-            setMapTileUrl(resData.urlFormat);
-            setSocialMapTileUrl(resData.urlFormat); // fallback
+      setReport(textoRelatorio);
+      setErrorStatus("");
+
+      // ✅ Carregar assets (não bloqueia o relatório)
+      if (data?.asset_id && !data.asset_id.includes('SEU-USUARIO')) {
+        try {
+          const res = await fetch('/api/analise/asset-layer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assetId: data.asset_id })
+          });
+          const cType = res.headers.get("content-type");
+          if (cType && cType.indexOf("application/json") !== -1) {
+            const resData = await res.json();
+            if (resData.urlFormat) {
+              setMapTileUrl(resData.urlFormat);
+              setSocialMapTileUrl(resData.urlFormat);
+            }
           }
+        } catch (e) {
+          console.error("Erro ao carregar Asset Layer:", e);
         }
-      } catch (e) {
-         console.error("Erro ao carregar Asset Layer:", e);
-      }
-    } else {
-      // Como GEE não é acessado, exibimos a camada salva no Supabase se existir (URL cacheada) ou bloqueamos.
-      if (data.url_asset_mapa_social) {
+      } else if (data?.url_asset_mapa_social) {
         setMapTileUrl(data.url_asset_mapa_social);
         setSocialMapTileUrl(data.url_asset_mapa_social);
       }
+
+      setIsProcessing(false);
+    } catch (err) {
+      console.error("Erro no processamento do pipeline:", err);
+      setErrorStatus(`Erro ao processar pipeline: ${err instanceof Error ? err.message : String(err)}`);
+      setIsProcessing(false);
     }
   };
 
