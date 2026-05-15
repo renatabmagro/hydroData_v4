@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Database, Map as MapIcon, Download, CheckCircle, Loader2, Play, Layers, FileText, Activity, Server, Key, Trash2, LineChart, Info } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import * as L from 'leaflet';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://pnedbwdgcwlicitmfymz.supabase.co';
 const supabaseKey = 'sb_publishable_LsKJ_gxuDVpQbh-i5WndqQ_PPyh7cJm';
 const supabase = createClient(supabaseUrl, supabaseKey);
 import TimeSeriesChart from './components/TimeSeriesChart';
+import ValidationPanel from './components/ValidationPanel';
 import AnalysisTab from './components/AnalysisTab';
+import { runValidationPipeline } from './core/engine/pipeline/validation.pipeline';
 
 // Fix for default marker icons in react-leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -54,8 +56,11 @@ interface RasterData {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'extract' | 'timeseries' | 'catalog' | 'analysis'>('extract');
+  const [activeTab, setActiveTab] = useState<'extract' | 'validation' | 'timeseries' | 'catalog' | 'analysis'>('extract');
   const [ivpcResultData, setIvpcResultData] = useState<any>(null);
+  const [validation, setValidation] = useState<any>(null);
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [extractedData, setExtractedData] = useState<any>(null);
   
   // State for Extraction
   const [selectedNivel, setSelectedNivel] = useState('Todos');
@@ -225,6 +230,8 @@ export default function App() {
     setIsExtracting(true);
     setExtractionComplete(false);
     setExtractionError('');
+    setValidation(null);
+    setExtractedData(null);
     setBasinGeojson(null);
     setMdtTileUrl(null);
     setShowMdtLayer(false);
@@ -306,6 +313,19 @@ export default function App() {
           setRiskGeojson(data.riscoGeojson);
         }
 
+        setExtractedData({
+          originalBasin: baciaPayload.geoJsonBacia,
+          extractedBasin: data.geomGeojson,
+          originalUrban: data.urbanizacaoGeojson,
+          extractedUrban: data.urbanizacaoGeojson,
+          originalDrainage: null,
+          extractedDrainage: null,
+          originalStations: [],
+          extractedStations: [],
+          floodRaster: null
+        });
+        setValidation(null);
+
         // Automatic IVPC calculation during extraction
         try {
           const resEstReq = await fetch('/api/estacoes', {
@@ -369,6 +389,24 @@ export default function App() {
     }
   };
 
+  async function runValidation() {
+    if (!extractedData) return;
+
+    setIsAuditing(true);
+
+    try {
+      const validationResult =
+        await runValidationPipeline(extractedData);
+
+      setValidation(validationResult);
+    } catch (validationError) {
+      console.error("Erro ao executar validação:", validationError);
+      setValidation(null);
+    } finally {
+      setIsAuditing(false);
+    }
+  }
+
   const mapCenterLat = -15;
   const mapCenterLng = -50;
 
@@ -395,6 +433,17 @@ export default function App() {
           >
             <Download className="w-4 h-4" />
             Nova Extração
+          </button>
+          <button
+            onClick={() => setActiveTab('validation')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'validation' 
+                ? 'bg-blue-600 text-white' 
+                : 'hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Validação
           </button>
           <button
             onClick={() => setActiveTab('timeseries')}
@@ -833,6 +882,15 @@ export default function App() {
                 </div>
               </div>
             </div>
+          </div>
+        ) : activeTab === 'validation' ? (
+          <div className="p-8 max-w-6xl mx-auto">
+            <ValidationPanel
+              auditReport={validation}
+              isAuditing={isAuditing}
+              canRunValidation={!!extractedData}
+              onRunValidation={runValidation}
+            />
           </div>
         ) : activeTab === 'timeseries' ? (
           <div className="p-8 max-w-6xl mx-auto">
