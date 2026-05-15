@@ -82,13 +82,9 @@ export async function runIVPCPipeline(
     universo total da bacia.
   */
 
-  const urbanTotalArea =
-    blindSpotPercentage > 0
-      ? (
-          urbanBlindSpotArea /
-          (blindSpotPercentage / 100)
-        )
-      : urbanEligibleArea;
+  // ✅ CORREÇÃO: urbanTotalArea = urbanEligibleArea (são o mesmo universo)
+  // blindSpotPercentage já está calculado como razão de urbanEligibleArea
+  const urbanTotalArea = urbanEligibleArea;
 
   const urbanMonitoredArea =
     Math.max(
