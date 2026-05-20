@@ -36,17 +36,21 @@ function MapUpdater({ geoJson }: { geoJson: any }) {
   const map = useMap();
   useEffect(() => {
     if (geoJson) {
-      try {
-        import("@turf/turf").then((turf) => {
-          const bbox = turf.bbox(geoJson);
-          map.fitBounds([
-            [bbox[1], bbox[0]],
-            [bbox[3], bbox[2]],
-          ]);
+      import("@turf/turf")
+        .then((turf) => {
+          try {
+            const bbox = turf.bbox(geoJson);
+            map.fitBounds([
+              [bbox[1], bbox[0]],
+              [bbox[3], bbox[2]],
+            ]);
+          } catch (err) {
+            console.error("Erro ao fazer zoom:", err);
+          }
+        })
+        .catch((err) => {
+          console.error("Erro ao carregar @turf/turf:", err);
         });
-      } catch (err) {
-        console.error("Erro ao fazer zoom:", err);
-      }
     }
   }, [geoJson, map]);
   return null;
