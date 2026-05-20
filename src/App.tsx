@@ -8,7 +8,6 @@ const supabaseUrl = 'https://pnedbwdgcwlicitmfymz.supabase.co';
 const supabaseKey = 'sb_publishable_LsKJ_gxuDVpQbh-i5WndqQ_PPyh7cJm';
 const supabase = createClient(supabaseUrl, supabaseKey);
 import TimeSeriesChart from './components/TimeSeriesChart';
-import ValidationPanel from './components/ValidationPanel';
 import AnalysisTab from './components/AnalysisTab';
 import ValidationPanel from './components/ValidationPanel';
 import { handleExtractionComplete } from './services/extractionResponseProcessor';
