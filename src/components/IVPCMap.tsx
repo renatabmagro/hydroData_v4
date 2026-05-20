@@ -82,38 +82,56 @@ export default function IVPCMap({
       try {
         const turf = await import("@turf/turf");
 
-        console.log("🔄 Calculando buffers de", bufferRadius, "km para", estacoes.length, "estações...");
+        console.log(
+          "🔄 Calculando buffers de",
+          bufferRadius,
+          "km para",
+          estacoes.length,
+          "estações..."
+        );
 
         // 1. Criar buffers de 10 km ao redor de cada estação
-        const buffers = estacoes
-          .map((est) => {
-            const point = turf.point([est.longitude, est.latitude]);
-            // Buffer em km
-            return turf.buffer(point, bufferRadius, { units: "kilometers" });
-          });
+        const buffers = estacoes.map((est) => {
+          const point = turf.point([est.longitude, est.latitude]);
+          return turf.buffer(point, bufferRadius, { units: "kilometers" });
+        });
 
         if (buffers.length === 0) {
           console.log("❌ Nenhum buffer criado");
           return;
         }
 
-        // 2. Unir todos os buffers
-        let unionedBuffer = buffers[0];
-        for (let i = 1; i < buffers.length; i++) {
-          try {
-            unionedBuffer = turf.union(unionedBuffer, buffers[i]);
-          } catch (e) {
-            console.warn("⚠️ Erro ao unir buffers:", e);
-          }
+        console.log("✓ Buffers individuais criados:", buffers.length);
+
+        // 2. Unir todos os buffers - usar featureCollection + union
+        console.log("📍 Iniciando union de buffers...");
+        
+        // CORRIGIDO: turf.union() espera um array de features
+        let unionedBuffer = turf.union(
+          turf.featureCollection(buffers)
+        );
+
+        if (!unionedBuffer || !unionedBuffer.geometry) {
+          console.error("❌ Falha ao unir buffers");
+          return;
         }
 
-        console.log("✓ Buffers calculados e unidos");
+        console.log("✓ Buffers unidos com sucesso", {
+          type: unionedBuffer.type,
+          geomType: unionedBuffer.geometry?.type,
+        });
 
         // 3. Extrair bacia feature
         let basinFeature = basinGeojson;
         if (basinGeojson.type === "FeatureCollection") {
           basinFeature = basinGeojson.features[0];
+          console.log("📍 Extraído Feature da FeatureCollection");
         }
+
+        console.log("📍 Basin feature:", {
+          type: basinFeature?.type,
+          geomType: basinFeature?.geometry?.type,
+        });
 
         if (!basinFeature || !basinFeature.geometry) {
           console.error("❌ Bacia não possui geometria válida");
@@ -122,10 +140,22 @@ export default function IVPCMap({
 
         // 4. Calcular área monitorada = intersecção entre bacia e buffers
         try {
-          const monitoredArea = turf.intersect(basinFeature, unionedBuffer);
-          
+          console.log("🔄 Calculando intersecção (monitorada)...");
+          // CORRIGIDO: turf.intersect espera um FeatureCollection
+          const monitoredArea = turf.intersect(
+            turf.featureCollection([basinFeature, unionedBuffer])
+          );
+
+          console.log("📍 Monitored area result:", {
+            type: monitoredArea?.type,
+            geomType: monitoredArea?.geometry?.type,
+            hasGeometry: !!monitoredArea?.geometry,
+          });
+
           if (monitoredArea && monitoredArea.geometry) {
-            console.log("✓ Área monitorada calculada (dentro de 10km)");
+            console.log("✓ Área monitorada calculada", {
+              geomType: monitoredArea.geometry.type,
+            });
             setMonitoredGeoJson({
               type: "FeatureCollection",
               features: [
@@ -139,13 +169,31 @@ export default function IVPCMap({
                 },
               ],
             });
+          } else {
+            console.warn("⚠️ monitoredArea inválida:", monitoredArea);
           }
+        } catch (e) {
+          console.error("❌ Erro ao calcular intersecção:", e);
+        }
 
-          // 5. Área de blind spot = bacia - buffers
-          const blindSpotArea = turf.difference(basinFeature, unionedBuffer);
-          
+        // 5. Área de blind spot = bacia - buffers
+        try {
+          console.log("🔄 Calculando diferença (blind spot)...");
+          // CORRIGIDO: turf.difference espera um FeatureCollection
+          const blindSpotArea = turf.difference(
+            turf.featureCollection([basinFeature, unionedBuffer])
+          );
+
+          console.log("📍 Blind spot area result:", {
+            type: blindSpotArea?.type,
+            geomType: blindSpotArea?.geometry?.type,
+            hasGeometry: !!blindSpotArea?.geometry,
+          });
+
           if (blindSpotArea && blindSpotArea.geometry) {
-            console.log("✓ Blind spot calculado (> 10km de estação)");
+            console.log("✓ Blind spot calculado", {
+              geomType: blindSpotArea.geometry.type,
+            });
             setBlindSpotGeoJson({
               type: "FeatureCollection",
               features: [
@@ -159,9 +207,11 @@ export default function IVPCMap({
                 },
               ],
             });
+          } else {
+            console.warn("⚠️ blindSpotArea inválida:", blindSpotArea);
           }
         } catch (e) {
-          console.error("❌ Erro ao calcular diferença/interseção:", e);
+          console.error("❌ Erro ao calcular diferença:", e);
         }
       } catch (err) {
         console.error("❌ Erro ao calcular buffers:", err);
@@ -225,7 +275,9 @@ export default function IVPCMap({
             ) : (
               <EyeOff className="w-3 h-3 text-slate-400" />
             )}
-            <span className="font-medium text-slate-700 text-[11px]">Monitorado</span>
+            <span className="font-medium text-slate-700 text-[11px]">
+              Monitorado
+            </span>
             <div className="w-3 h-3 rounded bg-green-400"></div>
           </button>
 
@@ -240,7 +292,9 @@ export default function IVPCMap({
             ) : (
               <EyeOff className="w-3 h-3 text-slate-400" />
             )}
-            <span className="font-medium text-slate-700 text-[11px]">Blind Spot</span>
+            <span className="font-medium text-slate-700 text-[11px]">
+              Blind Spot
+            </span>
             <div className="w-3 h-3 rounded bg-orange-500"></div>
           </button>
 
@@ -256,7 +310,9 @@ export default function IVPCMap({
               ) : (
                 <EyeOff className="w-3 h-3 text-slate-400" />
               )}
-              <span className="font-medium text-slate-700 text-[11px]">Raios</span>
+              <span className="font-medium text-slate-700 text-[11px]">
+                Raios
+              </span>
               <div className="w-3 h-3 rounded-full border-2 border-emerald-500"></div>
             </button>
           )}
@@ -292,14 +348,16 @@ export default function IVPCMap({
               ) : (
                 <EyeOff className="w-3 h-3 text-slate-400" />
               )}
-              <span className="font-medium text-slate-700 text-[11px]">Satélite</span>
+              <span className="font-medium text-slate-700 text-[11px]">
+                Satélite
+              </span>
             </button>
           )}
         </div>
 
         {/* Spec Reference */}
         <p className="text-[10px] text-slate-500 mt-2 font-mono bg-slate-100 px-2 py-1 rounded">
-          IVPC Spec: Blind spot = distância &gt; {bufferRadius}km | Cálculo: Turf.js (buffer + union + difference)
+          IVPC Spec: Blind spot = distância &gt; {bufferRadius}km | Turf.js
         </p>
       </div>
 
@@ -335,7 +393,9 @@ export default function IVPCMap({
               }}
               onEachFeature={(feature, layer) => {
                 layer.bindPopup(
-                  `<strong>📍 Contorno da Bacia</strong><br/>Área elegível: ${metrics.urbanEligibleArea.toFixed(2)} km²`
+                  `<strong>📍 Contorno da Bacia</strong><br/>Área elegível: ${metrics.urbanEligibleArea.toFixed(
+                    2
+                  )} km²`
                 );
               }}
             />
@@ -355,7 +415,9 @@ export default function IVPCMap({
               }}
               onEachFeature={(feature, layer) => {
                 layer.bindPopup(
-                  `<strong>✓ Área Monitorada</strong><br/>Dentro de ${bufferRadius}km de estação<br/>Cobertura operacional: ${(100 - metrics.blindSpotPercentage).toFixed(1)}%`
+                  `<strong>✓ Área Monitorada</strong><br/>Dentro de ${bufferRadius}km de estação<br/>Cobertura operacional: ${(
+                    100 - metrics.blindSpotPercentage
+                  ).toFixed(1)}%`
                 );
               }}
             />
@@ -375,7 +437,9 @@ export default function IVPCMap({
               }}
               onEachFeature={(feature, layer) => {
                 layer.bindPopup(
-                  `<strong>⚠️ Deficiência Operacional (Blind Spot)</strong><br/>Distância > ${bufferRadius}km<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(1)}%<br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²<br/>Pop. vulnerável: 46.413 hab.`
+                  `<strong>⚠️ Deficiência Operacional (Blind Spot)</strong><br/>Distância > ${bufferRadius}km<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(
+                    1
+                  )}%<br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²`
                 );
               }}
             />
