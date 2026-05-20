@@ -57,6 +57,10 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
   const [isDownloading, setIsDownloading] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
 
+  useEffect(() => {
+    setPipelineResult(null);
+  }, [selectedBaciaMetadata, selectedBaciaGeojson]);
+
   const handleDownloadPDF = async () => {
     const element = document.getElementById("report-content");
     if (!element) return;
