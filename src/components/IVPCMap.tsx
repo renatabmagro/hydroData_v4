@@ -71,6 +71,26 @@ export default function IVPCMap({
   const [monitoredGeoJson, setMonitoredGeoJson] = useState<any>(null);
   const [bufferRadius] = useState(10); // 10 km conforme IVPC spec
 
+  // ✅ NOVO: Expor estado globalmente para debug
+  useEffect(() => {
+    (window as any).ivpcState = {
+      layerVisibility,
+      blindSpotGeoJson,
+      monitoredGeoJson,
+      estacoes: estacoes?.length,
+      basinGeoJsonExists: !!basinGeojson,
+      basinGeoJsonType: basinGeojson?.type,
+      bufferRadius,
+      getSnapshot: () => ({
+        timestamp: new Date().toISOString(),
+        blindSpotFeatures: blindSpotGeoJson?.features?.length,
+        monitoredFeatures: monitoredGeoJson?.features?.length,
+        layerVisibility,
+      }),
+    };
+    console.log("💾 [DEBUG] Estado exposto em window.ivpcState");
+  }, [layerVisibility, blindSpotGeoJson, monitoredGeoJson, estacoes, basinGeojson, bufferRadius]);
+
   // Calcular buffers das estações e áreas de blind spot
   useEffect(() => {
     const calculateBuffers = async () => {
@@ -443,46 +463,62 @@ export default function IVPCMap({
 
           {/* Monitored Areas - Green (Inside 10km Buffers) */}
           {layerVisibility.monitored && monitoredGeoJson && (
-            <GeoJSON
-              key="monitored-areas"
-              data={monitoredGeoJson}
-              style={{
-                color: "#15803d",
-                weight: 1,
-                opacity: 0.7,
-                fillColor: "#4ade80",
-                fillOpacity: 0.5,
-              }}
-              onEachFeature={(feature, layer) => {
-                layer.bindPopup(
-                  `<strong>✓ Área Monitorada</strong><br/>Dentro de ${bufferRadius}km de estação<br/>Cobertura operacional: ${(
-                    100 - metrics.blindSpotPercentage
-                  ).toFixed(1)}%`
-                );
-              }}
-            />
+            <>
+              {console.log("🟢 [RENDER] Renderizando MONITORED GeoJSON:", {
+                features: monitoredGeoJson.features?.length,
+                type: monitoredGeoJson.type,
+                firstGeomType: monitoredGeoJson.features?.[0]?.geometry?.type,
+              })}
+              <GeoJSON
+                key="monitored-areas"
+                data={monitoredGeoJson}
+                style={{
+                  color: "#15803d",
+                  weight: 1,
+                  opacity: 0.7,
+                  fillColor: "#4ade80",
+                  fillOpacity: 0.5,
+                }}
+                onEachFeature={(feature, layer) => {
+                  console.log("🟢 [FEATURE] Feature renderizada em layer");
+                  layer.bindPopup(
+                    `<strong>✓ Área Monitorada</strong><br/>Dentro de ${bufferRadius}km de estação<br/>Cobertura operacional: ${(
+                      100 - metrics.blindSpotPercentage
+                    ).toFixed(1)}%`
+                  );
+                }}
+              />
+            </>
           )}
 
           {/* Blind Spot Areas - Orange/Red (Outside 10km Buffers) */}
           {layerVisibility.blindSpot && blindSpotGeoJson && (
-            <GeoJSON
-              key="blind-spot-areas"
-              data={blindSpotGeoJson}
-              style={{
-                color: "#991b1b",
-                weight: 1,
-                opacity: 0.8,
-                fillColor: "#f97316",
-                fillOpacity: 0.6,
-              }}
-              onEachFeature={(feature, layer) => {
-                layer.bindPopup(
-                  `<strong>⚠️ Deficiência Operacional (Blind Spot)</strong><br/>Distância > ${bufferRadius}km<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(
-                    1
-                  )}%<br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²`
-                );
-              }}
-            />
+            <>
+              {console.log("🟠 [RENDER] Renderizando BLIND SPOT GeoJSON:", {
+                features: blindSpotGeoJson.features?.length,
+                type: blindSpotGeoJson.type,
+                firstGeomType: blindSpotGeoJson.features?.[0]?.geometry?.type,
+              })}
+              <GeoJSON
+                key="blind-spot-areas"
+                data={blindSpotGeoJson}
+                style={{
+                  color: "#991b1b",
+                  weight: 1,
+                  opacity: 0.8,
+                  fillColor: "#f97316",
+                  fillOpacity: 0.6,
+                }}
+                onEachFeature={(feature, layer) => {
+                  console.log("🟠 [FEATURE] Feature de blind spot renderizada em layer");
+                  layer.bindPopup(
+                    `<strong>⚠️ Deficiência Operacional (Blind Spot)</strong><br/>Distância > ${bufferRadius}km<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(
+                      1
+                    )}%<br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²`
+                  );
+                }}
+              />
+            </>
           )}
 
           {/* Buffer Circles - Visual Reference (10 km raios tracejados) */}
