@@ -74,6 +74,10 @@ export default function IVPCMap({
   // Calcular buffers das estações e áreas de blind spot
   useEffect(() => {
     const calculateBuffers = async () => {
+      console.log("🔵 [IVPCMap] useEffect iniciado");
+      console.log("  - estacoes:", estacoes?.length || 0);
+      console.log("  - basinGeojson type:", basinGeojson?.type);
+      
       if (!estacoes.length || !basinGeojson) {
         console.log("⚠️ Sem estações ou bacia para calcular buffers");
         return;
@@ -81,6 +85,7 @@ export default function IVPCMap({
 
       try {
         const turf = await import("@turf/turf");
+        console.log("✓ Turf.js importado com sucesso");
 
         console.log(
           "🔄 Calculando buffers de",
@@ -91,9 +96,11 @@ export default function IVPCMap({
         );
 
         // 1. Criar buffers de 10 km ao redor de cada estação
-        const buffers = estacoes.map((est) => {
+        const buffers = estacoes.map((est, i) => {
           const point = turf.point([est.longitude, est.latitude]);
-          return turf.buffer(point, bufferRadius, { units: "kilometers" });
+          const buf = turf.buffer(point, bufferRadius, { units: "kilometers" });
+          console.log(`  Buffer ${i}: ${est.nome} [${est.longitude}, ${est.latitude}] -> type: ${buf.geometry?.type}`);
+          return buf;
         });
 
         if (buffers.length === 0) {
@@ -107,18 +114,27 @@ export default function IVPCMap({
         console.log("📍 Iniciando union de buffers...");
         
         // CORRIGIDO: turf.union() espera um array de features
-        let unionedBuffer = turf.union(
-          turf.featureCollection(buffers)
-        );
+        let unionedBuffer;
+        try {
+          const fc = turf.featureCollection(buffers);
+          console.log("  FeatureCollection criado com", fc.features.length, "features");
+          unionedBuffer = turf.union(fc);
+          console.log("  Union executado, resultado type:", unionedBuffer?.type);
+        } catch (unionErr) {
+          console.error("❌ Erro no turf.union():", unionErr);
+          throw unionErr;
+        }
 
         if (!unionedBuffer || !unionedBuffer.geometry) {
-          console.error("❌ Falha ao unir buffers");
+          console.error("❌ Falha ao unir buffers - resultado inválido");
+          console.log("  unionedBuffer:", unionedBuffer);
           return;
         }
 
         console.log("✓ Buffers unidos com sucesso", {
           type: unionedBuffer.type,
           geomType: unionedBuffer.geometry?.type,
+          coordsLength: JSON.stringify(unionedBuffer.geometry).length,
         });
 
         // 3. Extrair bacia feature
@@ -142,25 +158,31 @@ export default function IVPCMap({
         try {
           console.log("🔄 Calculando intersecção (monitorada)...");
           // CORRIGIDO: turf.intersect espera um FeatureCollection
-          const monitoredArea = turf.intersect(
-            turf.featureCollection([basinFeature, unionedBuffer])
-          );
+          const fcIntersect = turf.featureCollection([basinFeature, unionedBuffer]);
+          console.log("  FeatureCollection para intersect:", {
+            features: fcIntersect.features.length,
+            types: fcIntersect.features.map(f => f.geometry?.type),
+          });
+          
+          const monitoredArea = turf.intersect(fcIntersect);
 
           console.log("📍 Monitored area result:", {
+            exists: !!monitoredArea,
             type: monitoredArea?.type,
             geomType: monitoredArea?.geometry?.type,
             hasGeometry: !!monitoredArea?.geometry,
+            coordsLength: monitoredArea?.geometry ? JSON.stringify(monitoredArea.geometry).length : 0,
           });
 
           if (monitoredArea && monitoredArea.geometry) {
             console.log("✓ Área monitorada calculada", {
               geomType: monitoredArea.geometry.type,
             });
-            setMonitoredGeoJson({
-              type: "FeatureCollection",
+            const monitoredFeatureCollection = {
+              type: "FeatureCollection" as const,
               features: [
                 {
-                  type: "Feature",
+                  type: "Feature" as const,
                   geometry: monitoredArea.geometry,
                   properties: {
                     type: "monitored",
@@ -168,7 +190,12 @@ export default function IVPCMap({
                   },
                 },
               ],
+            };
+            console.log("  Setando monitoredGeoJson com:", {
+              type: monitoredFeatureCollection.type,
+              features: monitoredFeatureCollection.features.length,
             });
+            setMonitoredGeoJson(monitoredFeatureCollection);
           } else {
             console.warn("⚠️ monitoredArea inválida:", monitoredArea);
           }
@@ -180,25 +207,31 @@ export default function IVPCMap({
         try {
           console.log("🔄 Calculando diferença (blind spot)...");
           // CORRIGIDO: turf.difference espera um FeatureCollection
-          const blindSpotArea = turf.difference(
-            turf.featureCollection([basinFeature, unionedBuffer])
-          );
+          const fcDifference = turf.featureCollection([basinFeature, unionedBuffer]);
+          console.log("  FeatureCollection para difference:", {
+            features: fcDifference.features.length,
+            types: fcDifference.features.map(f => f.geometry?.type),
+          });
+          
+          const blindSpotArea = turf.difference(fcDifference);
 
           console.log("📍 Blind spot area result:", {
+            exists: !!blindSpotArea,
             type: blindSpotArea?.type,
             geomType: blindSpotArea?.geometry?.type,
             hasGeometry: !!blindSpotArea?.geometry,
+            coordsLength: blindSpotArea?.geometry ? JSON.stringify(blindSpotArea.geometry).length : 0,
           });
 
           if (blindSpotArea && blindSpotArea.geometry) {
             console.log("✓ Blind spot calculado", {
               geomType: blindSpotArea.geometry.type,
             });
-            setBlindSpotGeoJson({
-              type: "FeatureCollection",
+            const blindSpotFeatureCollection = {
+              type: "FeatureCollection" as const,
               features: [
                 {
-                  type: "Feature",
+                  type: "Feature" as const,
                   geometry: blindSpotArea.geometry,
                   properties: {
                     type: "blindSpot",
@@ -206,13 +239,20 @@ export default function IVPCMap({
                   },
                 },
               ],
+            };
+            console.log("  Setando blindSpotGeoJson com:", {
+              type: blindSpotFeatureCollection.type,
+              features: blindSpotFeatureCollection.features.length,
             });
+            setBlindSpotGeoJson(blindSpotFeatureCollection);
           } else {
             console.warn("⚠️ blindSpotArea inválida:", blindSpotArea);
           }
         } catch (e) {
           console.error("❌ Erro ao calcular diferença:", e);
         }
+        
+        console.log("🟢 [IVPCMap] Cálculo concluído com sucesso");
       } catch (err) {
         console.error("❌ Erro ao calcular buffers:", err);
       }
