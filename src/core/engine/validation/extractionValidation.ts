@@ -68,21 +68,6 @@ export async function validateExtraction(
       ? validPixels / totalPixels
       : null;
 
-  const originalUrbanArea =
-    input.originalUrban
-      ? turf.area(input.originalUrban)
-      : 0;
-
-  const extractedUrbanArea =
-    input.extractedUrban
-      ? turf.area(input.extractedUrban)
-      : 0;
-
-  const urbanError =
-    originalUrbanArea > 0
-      ? Math.abs(originalUrbanArea - extractedUrbanArea) / originalUrbanArea
-      : 1;
-
   const MUN =
     Math.max(0, 1 - urbanError);
 
