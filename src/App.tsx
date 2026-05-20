@@ -1022,6 +1022,7 @@ export default function App() {
             selectedBaciaMetadata={selectedCustomBacia}
             selectedBaciaGeojson={basinGeojson}
             ivpcResultData={ivpcResultData}
+            estacoes={estacoes}
           />
         ) : activeTab === 'validation' ? (
           <div className="p-8 max-w-6xl mx-auto">
