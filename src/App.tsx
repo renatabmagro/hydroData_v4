@@ -9,6 +9,7 @@ const supabaseKey = 'sb_publishable_LsKJ_gxuDVpQbh-i5WndqQ_PPyh7cJm';
 const supabase = createClient(supabaseUrl, supabaseKey);
 import TimeSeriesChart from './components/TimeSeriesChart';
 import AnalysisTab from './components/AnalysisTab';
+import ValidationPanel from './components/ValidationPanel';
 
 // Fix for default marker icons in react-leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -54,7 +55,7 @@ interface RasterData {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'extract' | 'timeseries' | 'catalog' | 'analysis'>('extract');
+  const [activeTab, setActiveTab] = useState<'extract' | 'timeseries' | 'catalog' | 'analysis' | 'validation'>('extract');
   const [ivpcResultData, setIvpcResultData] = useState<any>(null);
   
   // State for Extraction
@@ -428,6 +429,17 @@ export default function App() {
           >
             <Layers className="w-4 h-4" />
             Análise
+          </button>
+          <button
+            onClick={() => setActiveTab('validation')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'validation' 
+                ? 'bg-green-600 text-white' 
+                : 'hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            Validação
           </button>
         </nav>
 
@@ -1011,6 +1023,14 @@ export default function App() {
             selectedBaciaGeojson={basinGeojson}
             ivpcResultData={ivpcResultData}
           />
+        ) : activeTab === 'validation' ? (
+          <div className="p-8 max-w-6xl mx-auto">
+            <ValidationPanel 
+              auditReport={null}
+              isAuditing={false}
+              onRunValidation={() => {}}
+            />
+          </div>
         ) : null}
       </div>
     </div>
