@@ -10,6 +10,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 import TimeSeriesChart from './components/TimeSeriesChart';
 import AnalysisTab from './components/AnalysisTab';
 import ValidationPanel from './components/ValidationPanel';
+import { handleExtractionComplete } from './services/extractionResponseProcessor';
+import { runValidationPipeline, canRunValidation } from './services/validationPipeline';
 
 // Fix for default marker icons in react-leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -320,8 +322,56 @@ export default function App() {
             try {
               const dataEst = JSON.parse(text);
               ests = dataEst.estacoes || dataEst;
-            } catch (e) {}
+              console.log(
+                "📍 [APP] Estações carregadas da API:",
+                {
+                  count: ests?.length,
+                  sample: ests?.slice(0, 2),
+                }
+              );
+            } catch (e) {
+              console.warn(
+                "⚠️ [APP] Erro ao parsear resposta de estações",
+                e
+              );
+            }
+          } else {
+            console.warn(
+              "⚠️ [APP] Erro ao carregar estações:",
+              resEstReq.status
+            );
           }
+
+          // ✅ NOVO: Persistir dados extraídos globalmente para validação
+          try {
+            await handleExtractionComplete(
+              {
+                success: data.success,
+                bacia_id: data.bacia_id || '',
+                area_km2: data.area_km2,
+                geomGeojson: data.geomGeojson,
+                mdtTileUrl: data.mdtTileUrl,
+                riosTileUrl: data.riosTileUrl,
+                inundacaoTileUrl: data.inundacaoTileUrl,
+                urbanizacaoGeojson: data.urbanizacaoGeojson,
+                riscoGeojson: data.riscoGeojson,
+              },
+              selectedCustomBacia?.nome_bacia || 'Sem Nome',
+              ests
+            );
+            console.log(
+              "✅ [APP] Dados extraídos persistidos para validação",
+              {
+                estacoes_persistidas: ests?.length,
+              }
+            );
+          } catch (persistError) {
+            console.error(
+              "❌ [APP] Erro ao persistir dados extraídos:",
+              persistError
+            );
+          }
+
           const resIvpc = await fetch('/api/analise/ivpc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1026,11 +1076,7 @@ export default function App() {
           />
         ) : activeTab === 'validation' ? (
           <div className="p-8 max-w-6xl mx-auto">
-            <ValidationPanel 
-              auditReport={null}
-              isAuditing={false}
-              onRunValidation={() => {}}
-            />
+            <ValidationPanel />
           </div>
         ) : null}
       </div>
