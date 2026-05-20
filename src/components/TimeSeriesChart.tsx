@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type FC } from 'react';
 import { 
   ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import { Loader2, AlertCircle, Map as MapIcon, Download, FileText } from 'lucide-react';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
-import L from 'leaflet';
+import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const MapUpdater = ({ geojson }: { geojson: any }) => {
@@ -22,7 +22,7 @@ interface TimeSeriesChartProps {
   selectedBasinGeoJSON: any;
 }
 
-const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({ selectedBasinGeoJSON }) => {
+const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ selectedBasinGeoJSON }) => {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);

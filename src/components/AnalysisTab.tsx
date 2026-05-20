@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Loader2, Zap, Users, ShieldAlert, Droplets, Download } from "lucide-react";
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet";
 import Markdown from "react-markdown";
@@ -101,7 +101,7 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
 
   const buscarAnaliseSupabase = async () => {
     if (!selectedBaciaMetadata?.id) return;
-    
+
     setReport("");
     setErrorStatus("Buscando indicadores pré-calculados do banco de dados...");
     setMapTileUrl(null);
@@ -109,7 +109,7 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
     setIsProcessing(true);
 
     try {
-      // ✅ Adicionar timeout na query (máx 10 segundos)
+      // ✅ Adicionar timeout na query (máx 10 segundos) - previne travamento
       const queryPromise = supabase
         .from('analise_ivpc')
         .select('*')
@@ -127,18 +127,35 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
         console.warn("Query retornou vazio ou erro:", error);
         
         if (ivpcResultData?.stats) {
-          console.log("Usando fallback com ivpcResultData");
-          // Mock data context since DB fetch failed
+          console.log("Using ivpcResultData.stats:", ivpcResultData.stats);
+          
+          // ✅ Validação numérica robusta dos dados fallback
+          const stats = ivpcResultData.stats;
+          const areaTotal = Number(stats.areaTotal) || 0;
+          const urbanEligibleArea = Number(stats.urbanEligibleArea) || 0;
+          const urbanBlindSpotArea = Number(stats.urbanBlindSpotArea) || 0;
+          const urbanTotalArea = Number(stats.urbanTotalArea) || 1;
+          const distMax = Number(stats.distMax) || 0;
+          const popTotalPontoCego = Number(stats.popTotalPontoCego) || 0;
+          const popIdososCriancas = Number(stats.popIdososCriancas) || 0;
+          const ivpcSocioambiental = Number(stats.ivpcSocioambiental) || 0;
+          
+          // Validação semântica: urbanEligibleArea ≤ areaTotal
+          const validatedUrbanEligibleArea = Math.min(urbanEligibleArea, areaTotal);
+          if (urbanEligibleArea > areaTotal) {
+            console.warn("Ajustando urbanEligibleArea:", { original: urbanEligibleArea, adjusted: validatedUrbanEligibleArea });
+          }
+          
           const dataToUse = {
-            area_total_km2: ivpcResultData.stats.areaTotal,
-            area_urbana_risco_km2: ivpcResultData.stats.urbanEligibleArea,
-            area_ponto_cego_km2: ivpcResultData.stats.urbanBlindSpotArea,
-            porcentagem_risco: ivpcResultData.stats.urbanTotalArea > 0 ? (ivpcResultData.stats.urbanBlindSpotArea / ivpcResultData.stats.urbanTotalArea) * 100 : 0,
-            distancia_max_km: ivpcResultData.stats.distMax / 1000,
-            pop_total_ponto_cego: ivpcResultData.stats.popTotalPontoCego,
-            pop_idosos_criancas_risco: ivpcResultData.stats.popIdososCriancas,
-            ivpc_socioambiental: ivpcResultData.stats.ivpcSocioambiental,
-            modo_metodologico: ivpcResultData.modoMetodologico,
+            area_total_km2: areaTotal,
+            area_urbana_risco_km2: validatedUrbanEligibleArea,
+            area_ponto_cego_km2: urbanBlindSpotArea,
+            porcentagem_risco: urbanTotalArea > 0 ? (urbanBlindSpotArea / urbanTotalArea) * 100 : 0,
+            distancia_max_km: distMax / 1000,
+            pop_total_ponto_cego: popTotalPontoCego,
+            pop_idosos_criancas_risco: popIdososCriancas,
+            ivpc_socioambiental: ivpcSocioambiental,
+            modo_metodologico: ivpcResultData.modoMetodologico || 'padrao',
             url_asset_mapa_social: ivpcResultData.socialUrlFormat || ''
           };
           
@@ -146,7 +163,6 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
           await processarPipeline(dataToUse, null);
         } else {
           setErrorStatus("A Análise IVPC ainda não foi gerada para esta bacia. Por favor, volte à aba 'Nova Extração' e realize a extração de dados para calcular o índice.");
-          setIsProcessing(false);
         }
         return;
       }
@@ -160,7 +176,6 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
       } catch (validationError) {
         console.error("Erro na validação dos dados:", validationError);
         setErrorStatus("Erro ao validar dados do banco de dados. Verifique se estão completos.");
-        setIsProcessing(false);
         return;
       }
 
@@ -169,7 +184,9 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
 
     } catch (err) {
       console.error("Erro na busca/processamento:", err);
-      setErrorStatus(`Erro ao processar análise: ${err instanceof Error ? err.message : String(err)}`);
+      console.error("Error details:", err instanceof Error ? err.message : err);
+      setErrorStatus(`Erro ao processar análise: ${err instanceof Error ? err.message : 'Erro desconhecido'}. Verifique os dados da extração.`);
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -242,12 +259,9 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
         setMapTileUrl(data.url_asset_mapa_social);
         setSocialMapTileUrl(data.url_asset_mapa_social);
       }
-
-      setIsProcessing(false);
     } catch (err) {
       console.error("Erro no processamento do pipeline:", err);
       setErrorStatus(`Erro ao processar pipeline: ${err instanceof Error ? err.message : String(err)}`);
-      setIsProcessing(false);
     }
   };
 

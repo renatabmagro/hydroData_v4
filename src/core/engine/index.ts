@@ -1,4 +1,5 @@
 export * from "./pipeline/ivpc.pipeline";
+export * from "./pipeline/validation.pipeline";
 
 export * from "./eligibility/eligibility";
 
