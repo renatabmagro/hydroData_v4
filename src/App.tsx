@@ -615,7 +615,7 @@ export default function App() {
                     {extractionComplete && (
                       <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-md text-emerald-800 text-sm">
                         <CheckCircle className="w-4 h-4 inline mr-2" />
-                        <strong>Sucesso!</strong> {selectedCustomBacia?.nome_bacia ? `(${selectedCustomBacia.nome_bacia})` : ''} processada com sucesso.
+                        <strong>Sucesso!</strong> {selectedCustomBacia?.nome_bacia ? `${selectedCustomBacia.nome_bacia}` : ''} processada com sucesso.
                       </div>
                     )}
                   </div>
