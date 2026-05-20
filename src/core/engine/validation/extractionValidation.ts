@@ -1,90 +1,232 @@
 import * as turf from "@turf/turf";
+
 import {
   ValidationInput,
   ValidationScores
 } from "./validation.types";
 
+// ======================================================
+// HELPERS
+// ======================================================
+
+function calcMedia(
+  values: Array<number | null>
+): number | null {
+
+  const validValues =
+    values.filter(
+      (v): v is number =>
+        v !== null &&
+        !Number.isNaN(v)
+    );
+
+  if (validValues.length === 0) {
+    return null;
+  }
+
+  return (
+    validValues.reduce((a, b) => a + b, 0)
+    / validValues.length
+  );
+}
+
+// ======================================================
+// MAIN VALIDATION
+// ======================================================
+
 export async function validateExtraction(
   input: ValidationInput
 ): Promise<ValidationScores> {
 
-  const originalArea =
-    input.originalBasin
-      ? turf.area(input.originalBasin)
-      : 0;
+  const {
+    basinGeojson,
+    mdtTileUrl,
+    riosTileUrl,
+    inundacaoTileUrl,
+    inundacaoStats,
+    estacoes,
+    urbGeojson,
+    populationData,
+    riskGeojson
+  } = input;
 
-  const extractedArea =
-    input.extractedBasin
-      ? turf.area(input.extractedBasin)
-      : 0;
+  // ======================================================
+  // DEBUG
+  // ======================================================
 
-  const areaError =
-    originalArea > 0
-      ? Math.abs(originalArea - extractedArea) / originalArea
-      : 1;
+  console.log("AUDIT INPUT", {
+    basinGeojson,
+    mdtTileUrl,
+    riosTileUrl,
+    inundacaoTileUrl,
+    inundacaoStats,
+    estacoes,
+    urbGeojson,
+    populationData,
+    riskGeojson
+  });
 
-  const scoreArea =
-    Math.max(0, 1 - areaError);
+  // ======================================================
+  // 1. FIS — FISIOGRAFIA
+  // ======================================================
 
-  const totalDrainage =
-    input.originalDrainage?.features?.length ?? 0;
-
-  const extractedDrainage =
-    input.extractedDrainage?.features?.length ?? 0;
-
-  const scoreDrainage =
-    totalDrainage > 0
-      ? extractedDrainage / totalDrainage
+  const score_basin =
+    basinGeojson &&
+    turf.area(basinGeojson) > 0
+      ? 1.0
       : null;
 
-  const fisValues =
-    [scoreArea, scoreDrainage]
-      .filter((v) => v !== null) as number[];
+  const score_dem =
+    mdtTileUrl
+      ? 1.0
+      : null;
+
+  const score_net =
+    riosTileUrl
+      ? 1.0
+      : null;
 
   const FIS =
-    fisValues.length > 0
-      ? fisValues.reduce((a, b) => a + b, 0) / fisValues.length
+    calcMedia([
+      score_basin,
+      score_dem,
+      score_net
+    ]);
+
+  // ======================================================
+  // 2. INU — INUNDAÇÃO HISTÓRICA
+  // ======================================================
+
+  let INU: number | null = null;
+
+  if (
+    inundacaoStats &&
+    inundacaoStats.pixelCount > 0
+  ) {
+
+    INU = 1.0;
+
+  } else if (inundacaoTileUrl) {
+
+    INU = 1.0;
+
+  }
+
+  // ======================================================
+  // 3. PLU — ESTAÇÕES
+  // ======================================================
+
+  let PLU: number | null = null;
+
+  try {
+
+    const totalStations =
+      estacoes?.length ?? 0;
+
+    if (
+      totalStations > 0 &&
+      basinGeojson
+    ) {
+
+      let insideCount = 0;
+
+      for (const station of (estacoes ?? [])) {
+
+        const coords =
+          station?.geometry?.coordinates;
+
+        if (
+          !coords ||
+          coords.length < 2
+        ) {
+          continue;
+        }
+
+        const point =
+          turf.point(coords);
+
+        const isInside =
+          turf.booleanPointInPolygon(
+            point,
+            basinGeojson
+          );
+
+        if (isInside) {
+          insideCount++;
+        }
+      }
+
+      PLU =
+        insideCount / totalStations;
+    }
+
+  } catch (error) {
+
+    console.error(
+      "PLU validation error:",
+      error
+    );
+
+    PLU = null;
+  }
+
+  // ======================================================
+  // 4. MUN — DADOS MUNICIPAIS
+  // ======================================================
+
+  const score_urban =
+    urbGeojson
+      ? 1.0
       : null;
 
-  const totalStations =
-    input.originalStations?.length ?? 0;
-
-  const extractedStations =
-    input.extractedStations?.length ?? 0;
-
-  const PLU =
-    totalStations > 0
-      ? extractedStations / totalStations
+  const score_pop =
+    populationData
+      ? 1.0
       : null;
 
-  const totalPixels =
-    input.floodRaster?.totalPixels ?? 0;
-
-  const validPixels =
-    input.floodRaster?.validPixels ?? 0;
-
-  const INU =
-    totalPixels > 0
-      ? validPixels / totalPixels
+  const score_risk =
+    riskGeojson
+      ? 1.0
       : null;
 
   const MUN =
-    Math.max(0, 1 - urbanError);
+    calcMedia([
+      score_urban,
+      score_pop,
+      score_risk
+    ]);
 
-  const validScores =
-    [FIS, INU, PLU, MUN]
-      .filter((v) => v !== null) as number[];
+  // ======================================================
+  // 5. IQA FINAL
+  // ======================================================
 
   const IQA =
-    validScores.length > 0
-      ? validScores.reduce((a, b) => a + b, 0) / validScores.length
-      : 0;
+    calcMedia([
+      FIS,
+      INU,
+      PLU,
+      MUN
+    ]);
+
+  // ======================================================
+  // 6. STATUS FINAL
+  // ======================================================
+
+  const status =
+    IQA !== null && IQA >= 0.8
+      ? "Aprovado"
+      : "Pendente de Revisão";
+
+  // ======================================================
+  // RETURN
+  // ======================================================
 
   return {
     FIS,
     INU,
     PLU,
     MUN,
-    IQA
+    IQA,
+    status
   };
 }

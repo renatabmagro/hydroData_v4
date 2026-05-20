@@ -3,20 +3,45 @@ export interface ValidationScores {
   INU: number | null;
   PLU: number | null;
   MUN: number | null;
-  IQA: number;
+  IQA: number | null;
+  status: "Aprovado" | "Pendente de Revisão";
 }
 
 export interface ValidationInput {
-  originalBasin?: any;
-  extractedBasin?: any;
-  originalDrainage?: any;
-  extractedDrainage?: any;
-  originalStations?: any[];
-  extractedStations?: any[];
-  floodRaster?: {
-    totalPixels: number;
-    validPixels: number;
-  };
-  originalUrban?: any;
-  extractedUrban?: any;
+
+  // =========================================
+  // FIS
+  // =========================================
+
+  basinGeojson?: any;
+
+  mdtTileUrl?: string | null;
+
+  riosTileUrl?: string | null;
+
+  // =========================================
+  // INU
+  // =========================================
+
+  inundacaoTileUrl?: string | null;
+
+  inundacaoStats?: {
+    pixelCount: number;
+  } | null;
+
+  // =========================================
+  // PLU
+  // =========================================
+
+  estacoes?: any[];
+
+  // =========================================
+  // MUN
+  // =========================================
+
+  urbGeojson?: any;
+
+  populationData?: any;
+
+  riskGeojson?: any;
 }
