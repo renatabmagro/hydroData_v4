@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, GeoJSON, useMap, Marker, Popup, Circle } from "react-leaflet";
+import { MapContainer, TileLayer, GeoJSON as LeafletGeoJSON, useMap, Marker, Popup, Circle } from "react-leaflet";
 import L from "leaflet";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -445,7 +445,7 @@ export default function IVPCMap({
 
           {/* Basin Boundary */}
           {layerVisibility.basinBoundary && basinGeojson && (
-            <GeoJSON
+            <LeafletGeoJSON
               key="basin-boundary"
               data={basinGeojson}
               style={{
@@ -473,7 +473,7 @@ export default function IVPCMap({
                 type: monitoredGeoJson.type,
                 firstGeomType: monitoredGeoJson.features?.[0]?.geometry?.type,
               })}
-              <GeoJSON
+              <LeafletGeoJSON
                 key="monitored-areas"
                 data={monitoredGeoJson}
                 style={{
@@ -503,7 +503,7 @@ export default function IVPCMap({
                 type: blindSpotGeoJson.type,
                 firstGeomType: blindSpotGeoJson.features?.[0]?.geometry?.type,
               })}
-              <GeoJSON
+              <LeafletGeoJSON
                 key="blind-spot-areas"
                 data={blindSpotGeoJson}
                 style={{
