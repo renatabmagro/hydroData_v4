@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import { gerarRelatorioIVPC } from "./AnalysisEngine";
 import { runIVPCPipeline } from "../core/engine";
 import type {RawAnalysisInput} from "../core/engine";
+import IVPCMap from "./IVPCMap";
 
 // @ts-ignore
 import html2pdf from "html2pdf.js";
@@ -47,6 +48,7 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
   const [errorStatus, setErrorStatus] = useState<string>("");
   const [analisePrecalculada, setAnalisePrecalculada] = useState<any>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
 
   const handleDownloadPDF = async () => {
     const element = document.getElementById("report-content");
@@ -203,7 +205,8 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
       const metrics = pipelineResult.metrics;
       const ivpc = pipelineResult.ivpc;
 
-      console.log("Gerando relatório...");
+      // Salvar resultado do pipeline para o mapa
+      setPipelineResult(pipelineResult);
       const reportStartTime = performance.now();
 
       // Gera o relatório
@@ -337,8 +340,26 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
       )}
 
       <div className="flex flex-1 gap-6 min-h-[500px]">
+        {/* MAPA IVPC */}
+        <div className="w-full lg:w-1/2 flex-shrink-0">
+          {selectedBaciaGeojson && pipelineResult && (
+            <IVPCMap
+              basinGeojson={selectedBaciaGeojson}
+              metrics={{
+                urbanTotalArea: pipelineResult.metrics.urbanTotalArea || 0,
+                urbanBlindSpotArea: pipelineResult.metrics.urbanBlindSpotArea || 0,
+                urbanMonitoredArea: pipelineResult.metrics.urbanMonitoredArea || 0,
+                urbanEligibleArea: pipelineResult.metrics.urbanEligibleArea || 0,
+                blindSpotPercentage: pipelineResult.metrics.blindSpotPercentage || 0,
+                maxDistanceKm: pipelineResult.metrics.maxDistanceKm || 0,
+              }}
+              mapTileUrl={mapTileUrl}
+            />
+          )}
+        </div>
+
         {/* REPORT CONTAINER */}
-        <div className="w-full flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="w-full lg:w-1/2 flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="bg-slate-50 border-b border-slate-200 p-4 font-semibold text-slate-800 flex justify-between items-center">
             <span>Parecer Técnico ⚡ (Diagnóstico IVPC)</span>
             {report && (
