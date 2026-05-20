@@ -1,3 +1,8 @@
+import React, { useState, useEffect } from "react";
+import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { runValidationPipeline, canRunValidation } from "../services/validationPipeline";
+import { getExtractedData } from "../services/extractedDataStore";
+
 // ========================================
 // TYPES
 // ========================================
@@ -12,10 +17,10 @@ interface ValidationReport {
 }
 
 interface ValidationPanelProps {
-  auditReport: ValidationReport | null;
-  isAuditing: boolean;
+  auditReport?: ValidationReport | null;
+  isAuditing?: boolean;
   canRunValidation?: boolean;
-  onRunValidation: () => void;
+  onRunValidation?: () => void;
 }
 
 // ========================================
@@ -127,11 +132,73 @@ function MetricCard({
 // ========================================
 
 export default function ValidationPanel({
-  auditReport,
-  isAuditing,
-  canRunValidation = false,
+  auditReport: initialReport = null,
+  isAuditing: initialIsAuditing = false,
+  canRunValidation: initialCanRun = true,
   onRunValidation,
 }: ValidationPanelProps) {
+  // ✅ NOVO: Gerenciar estado interno de validação
+  const [auditReport, setAuditReport] = useState<ValidationReport | null>(
+    initialReport
+  );
+  const [isAuditing, setIsAuditing] = useState(initialIsAuditing);
+  const [canValidate, setCanValidate] = useState(initialCanRun);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // ✅ Verificar se há dados extraídos ao montar
+  useEffect(() => {
+    const checkValidationStatus = () => {
+      const canRun = canRunValidation();
+      setCanValidate(canRun);
+
+      if (!canRun) {
+        const extracted = getExtractedData();
+        console.log("⚠️ [VALIDATION] Dados insuficientes para validação:", {
+          basinGeojson: !!extracted.basinGeojson,
+          mdtTileUrl: !!extracted.mdtTileUrl,
+          estacoes: extracted.estacoes?.length,
+        });
+      }
+    };
+
+    // Verificar imediatamente e depois a cada 2 segundos (enquanto extração está em progresso)
+    checkValidationStatus();
+    const interval = setInterval(checkValidationStatus, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // ✅ Handler para executar validação
+  const handleValidationClick = async () => {
+    setIsAuditing(true);
+    setValidationError(null);
+
+    try {
+      console.log("🔵 [VALIDATION PANEL] Iniciando validação...");
+
+      const scores = await runValidationPipeline();
+
+      setAuditReport({
+        FIS: scores.FIS,
+        INU: scores.INU,
+        PLU: scores.PLU,
+        MUN: scores.MUN,
+        IQA: scores.IQA,
+        status: scores.status,
+      });
+
+      console.log("✅ [VALIDATION PANEL] Validação concluída com sucesso");
+    } catch (error: any) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Erro desconhecido na validação";
+      setValidationError(message);
+      console.error("❌ [VALIDATION PANEL] Erro:", error);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   return (
 
@@ -151,32 +218,56 @@ export default function ValidationPanel({
           </div>
 
           <button
-            onClick={onRunValidation}
-            disabled={isAuditing || !canRunValidation}
+            onClick={handleValidationClick}
+            disabled={isAuditing || !canValidate}
             className={
               `
               px-5 py-3 rounded-xl font-medium text-white transition-all
               ${
-                isAuditing || !canRunValidation
+                isAuditing || !canValidate
                   ? "bg-slate-400 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-700"
               }
             `
             }
           >
-
-            {isAuditing
-              ? "Executando validação..."
-              : "Executar Validação"}
-
+            {isAuditing ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                Executando validação...
+              </>
+            ) : !canValidate ? (
+              <>
+                <AlertCircle className="w-4 h-4 inline mr-2" />
+                Extraia dados primeiro
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-4 h-4 inline mr-2" />
+                Executar Validação
+              </>
+            )}
           </button>
 
         </div>
 
       </div>
 
+      {/* ERROR STATE */}
+      {validationError && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-red-800">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+            <div>
+              <h3 className="font-semibold">Erro na Validação</h3>
+              <p className="text-sm mt-1">{validationError}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* EMPTY STATE */}
-      {!auditReport && (
+      {!auditReport && !validationError && (
 
         <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-10 text-center">
 
