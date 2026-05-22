@@ -527,17 +527,7 @@ export default function App() {
             <Layers className="w-4 h-4" />
             Análise
           </button>
-          <button
-            onClick={() => setActiveTab('validation')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'validation' 
-                ? 'bg-green-600 text-white' 
-                : 'hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <CheckCircle className="w-4 h-4" />
-            Validação
-          </button>
+
         </nav>
 
         <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
