@@ -17,6 +17,13 @@ interface AnalysisTabProps {
   selectedBaciaMetadata: any;
   selectedBaciaGeojson: any;
   ivpcResultData?: any;
+  estacoes?: Array<{
+    latitude: number;
+    longitude: number;
+    nome: string;
+    codigo: string;
+    tipo: string;
+  }>;
 }
 
 function MapUpdater({ geoJson }: { geoJson: any }) {
@@ -39,7 +46,7 @@ function MapUpdater({ geoJson }: { geoJson: any }) {
   return null;
 }
 
-export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedBaciaGeojson, ivpcResultData }: AnalysisTabProps) {
+export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedBaciaGeojson, ivpcResultData, estacoes = [] }: AnalysisTabProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [report, setReport] = useState<string>("");
   const [mapTileUrl, setMapTileUrl] = useState<string | null>(null);
@@ -49,6 +56,10 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
   const [analisePrecalculada, setAnalisePrecalculada] = useState<any>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
+
+  useEffect(() => {
+    setPipelineResult(null);
+  }, [selectedBaciaMetadata, selectedBaciaGeojson]);
 
   const handleDownloadPDF = async () => {
     const element = document.getElementById("report-content");
@@ -353,6 +364,7 @@ export default function AnalysisTab({ supabase, selectedBaciaMetadata, selectedB
                 blindSpotPercentage: pipelineResult.metrics.blindSpotPercentage || 0,
                 maxDistanceKm: pipelineResult.metrics.maxDistanceKm || 0,
               }}
+              estacoes={estacoes}
               mapTileUrl={mapTileUrl}
             />
           )}

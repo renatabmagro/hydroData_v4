@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, GeoJSON, useMap, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, GeoJSON as LeafletGeoJSON, useMap, Marker, Popup, Circle } from "react-leaflet";
 import L from "leaflet";
 import { Eye, EyeOff } from "lucide-react";
 
@@ -27,6 +27,7 @@ interface LayerVisibility {
   basinBoundary: boolean;
   blindSpot: boolean;
   monitored: boolean;
+  buffers: boolean;
   estacoes: boolean;
   tileLayer: boolean;
 }
@@ -35,17 +36,21 @@ function MapUpdater({ geoJson }: { geoJson: any }) {
   const map = useMap();
   useEffect(() => {
     if (geoJson) {
-      try {
-        import("@turf/turf").then((turf) => {
-          const bbox = turf.bbox(geoJson);
-          map.fitBounds([
-            [bbox[1], bbox[0]],
-            [bbox[3], bbox[2]],
-          ]);
+      import("@turf/turf")
+        .then((turf) => {
+          try {
+            const bbox = turf.bbox(geoJson);
+            map.fitBounds([
+              [bbox[1], bbox[0]],
+              [bbox[3], bbox[2]],
+            ]);
+          } catch (err) {
+            console.error("Erro ao fazer zoom:", err);
+          }
+        })
+        .catch((err) => {
+          console.error("Erro ao carregar @turf/turf:", err);
         });
-      } catch (err) {
-        console.error("Erro ao fazer zoom:", err);
-      }
     }
   }, [geoJson, map]);
   return null;
@@ -61,85 +66,224 @@ export default function IVPCMap({
     basinBoundary: true,
     blindSpot: true,
     monitored: true,
+    buffers: true,
     estacoes: estacoes.length > 0,
     tileLayer: !!mapTileUrl,
   });
 
-  // Criar GeoJSON do blind spot como representação visual
-  const createBlindSpotVisualization = (): GeoJSON.FeatureCollection => {
-    if (!basinGeojson) {
-      return {
-        type: "FeatureCollection",
-        features: [],
-      };
-    }
+  const [blindSpotGeoJson, setBlindSpotGeoJson] = useState<any>(null);
+  const [monitoredGeoJson, setMonitoredGeoJson] = useState<any>(null);
+  const [bufferRadius] = useState(10); // 10 km conforme IVPC spec
 
-    // Se a bacia é um Polygon, usamos diretamente
-    // Se é MultiPolygon, processamos todos
-    const coordinates =
-      basinGeojson.type === "FeatureCollection"
-        ? basinGeojson.features[0]?.geometry?.coordinates ||
-          basinGeojson.coordinates
-        : basinGeojson.geometry?.coordinates || basinGeojson.coordinates;
+  // ✅ NOVO: Expor estado globalmente para debug
+  useEffect(() => {
+    (window as any).ivpcState = {
+      layerVisibility,
+      blindSpotGeoJson,
+      monitoredGeoJson,
+      estacoes: estacoes?.length,
+      basinGeoJsonExists: !!basinGeojson,
+      basinGeoJsonType: basinGeojson?.type,
+      bufferRadius,
+      getSnapshot: () => ({
+        timestamp: new Date().toISOString(),
+        blindSpotFeatures: blindSpotGeoJson?.features?.length,
+        monitoredFeatures: monitoredGeoJson?.features?.length,
+        layerVisibility,
+      }),
+    };
+    console.log("💾 [DEBUG] Estado exposto em window.ivpcState");
+  }, [layerVisibility, blindSpotGeoJson, monitoredGeoJson, estacoes, basinGeojson, bufferRadius]);
 
-    // Para simplificar, criamos uma representação visual do blind spot
-    // como um GeoJSON que ocupa a proporção do blind spot dentro da bacia
-    const blindSpotPercentage = metrics.blindSpotPercentage / 100;
+  // Calcular buffers das estações e áreas de blind spot
+  useEffect(() => {
+    const calculateBuffers = async () => {
+      console.log("🔵 [IVPCMap] useEffect iniciado");
+      console.log("  - estacoes:", estacoes?.length || 0);
+      console.log("  - basinGeojson type:", basinGeojson?.type);
+      
+      if (!estacoes.length || !basinGeojson) {
+        console.log("⚠️ Sem estações ou bacia para calcular buffers");
+        return;
+      }
 
-    // Criar um polígono simplificado que representa o blind spot
-    // (em produção, isso viria do cálculo real do pipeline)
-    const blindSpotGeometry = {
-      type: "Feature",
-      geometry: {
-        type: "Polygon",
-        coordinates: coordinates,
-      },
-      properties: {
-        type: "blindSpot",
-        area_km2: metrics.urbanBlindSpotArea,
-        percentage: metrics.blindSpotPercentage,
-      },
+      try {
+        const turf = await import("@turf/turf");
+        console.log("✓ Turf.js importado com sucesso");
+
+        console.log(
+          "🔄 Calculando buffers de",
+          bufferRadius,
+          "km para",
+          estacoes.length,
+          "estações..."
+        );
+
+        // 1. Criar buffers de 10 km ao redor de cada estação
+        const buffers = estacoes.map((est, i) => {
+          const point = turf.point([est.longitude, est.latitude]);
+          const buf = turf.buffer(point, bufferRadius, { units: "kilometers" });
+          console.log(`  Buffer ${i}: ${est.nome} [${est.longitude}, ${est.latitude}] -> type: ${buf.geometry?.type}`);
+          return buf;
+        });
+
+        if (buffers.length === 0) {
+          console.log("❌ Nenhum buffer criado");
+          return;
+        }
+
+        console.log("✓ Buffers individuais criados:", buffers.length);
+
+        // 2. Unir todos os buffers - usar featureCollection + union
+        console.log("📍 Iniciando union de buffers...");
+        
+        // CORRIGIDO: turf.union() espera um array de features
+        let unionedBuffer;
+        try {
+          const fc = turf.featureCollection(buffers);
+          console.log("  FeatureCollection criado com", fc.features.length, "features");
+          unionedBuffer = turf.union(fc);
+          console.log("  Union executado, resultado type:", unionedBuffer?.type);
+        } catch (unionErr) {
+          console.error("❌ Erro no turf.union():", unionErr);
+          throw unionErr;
+        }
+
+        if (!unionedBuffer || !unionedBuffer.geometry) {
+          console.error("❌ Falha ao unir buffers - resultado inválido");
+          console.log("  unionedBuffer:", unionedBuffer);
+          return;
+        }
+
+        console.log("✓ Buffers unidos com sucesso", {
+          type: unionedBuffer.type,
+          geomType: unionedBuffer.geometry?.type,
+          coordsLength: JSON.stringify(unionedBuffer.geometry).length,
+        });
+
+        // 3. Extrair bacia feature
+        let basinFeature = basinGeojson;
+        if (basinGeojson.type === "FeatureCollection") {
+          basinFeature = basinGeojson.features[0];
+          console.log("📍 Extraído Feature da FeatureCollection");
+        }
+
+        console.log("📍 Basin feature:", {
+          type: basinFeature?.type,
+          geomType: basinFeature?.geometry?.type,
+        });
+
+        if (!basinFeature || !basinFeature.geometry) {
+          console.error("❌ Bacia não possui geometria válida");
+          return;
+        }
+
+        // 4. Calcular área monitorada = intersecção entre bacia e buffers
+        try {
+          console.log("🔄 Calculando intersecção (monitorada)...");
+          // CORRIGIDO: turf.intersect espera um FeatureCollection
+          const fcIntersect = turf.featureCollection([basinFeature, unionedBuffer]);
+          console.log("  FeatureCollection para intersect:", {
+            features: fcIntersect.features.length,
+            types: fcIntersect.features.map(f => f.geometry?.type),
+          });
+          
+          const monitoredArea = turf.intersect(fcIntersect);
+
+          console.log("📍 Monitored area result:", {
+            exists: !!monitoredArea,
+            type: monitoredArea?.type,
+            geomType: monitoredArea?.geometry?.type,
+            hasGeometry: !!monitoredArea?.geometry,
+            coordsLength: monitoredArea?.geometry ? JSON.stringify(monitoredArea.geometry).length : 0,
+          });
+
+          if (monitoredArea && monitoredArea.geometry) {
+            console.log("✓ Área monitorada calculada", {
+              geomType: monitoredArea.geometry.type,
+            });
+            const monitoredFeatureCollection = {
+              type: "FeatureCollection" as const,
+              features: [
+                {
+                  type: "Feature" as const,
+                  geometry: monitoredArea.geometry,
+                  properties: {
+                    type: "monitored",
+                    description: `Dentro de ${bufferRadius} km de estação`,
+                  },
+                },
+              ],
+            };
+            console.log("  Setando monitoredGeoJson com:", {
+              type: monitoredFeatureCollection.type,
+              features: monitoredFeatureCollection.features.length,
+            });
+            setMonitoredGeoJson(monitoredFeatureCollection);
+          } else {
+            console.warn("⚠️ monitoredArea inválida:", monitoredArea);
+          }
+        } catch (e) {
+          console.error("❌ Erro ao calcular intersecção:", e);
+        }
+
+        // 5. Área de blind spot = bacia - buffers
+        try {
+          console.log("🔄 Calculando diferença (blind spot)...");
+          // CORRIGIDO: turf.difference espera um FeatureCollection
+          const fcDifference = turf.featureCollection([basinFeature, unionedBuffer]);
+          console.log("  FeatureCollection para difference:", {
+            features: fcDifference.features.length,
+            types: fcDifference.features.map(f => f.geometry?.type),
+          });
+          
+          const blindSpotArea = turf.difference(fcDifference);
+
+          console.log("📍 Blind spot area result:", {
+            exists: !!blindSpotArea,
+            type: blindSpotArea?.type,
+            geomType: blindSpotArea?.geometry?.type,
+            hasGeometry: !!blindSpotArea?.geometry,
+            coordsLength: blindSpotArea?.geometry ? JSON.stringify(blindSpotArea.geometry).length : 0,
+          });
+
+          if (blindSpotArea && blindSpotArea.geometry) {
+            console.log("✓ Blind spot calculado", {
+              geomType: blindSpotArea.geometry.type,
+            });
+            const blindSpotFeatureCollection = {
+              type: "FeatureCollection" as const,
+              features: [
+                {
+                  type: "Feature" as const,
+                  geometry: blindSpotArea.geometry,
+                  properties: {
+                    type: "blindSpot",
+                    description: `Deficiência operacional (> ${bufferRadius} km)`,
+                  },
+                },
+              ],
+            };
+            console.log("  Setando blindSpotGeoJson com:", {
+              type: blindSpotFeatureCollection.type,
+              features: blindSpotFeatureCollection.features.length,
+            });
+            setBlindSpotGeoJson(blindSpotFeatureCollection);
+          } else {
+            console.warn("⚠️ blindSpotArea inválida:", blindSpotArea);
+          }
+        } catch (e) {
+          console.error("❌ Erro ao calcular diferença:", e);
+        }
+        
+        console.log("🟢 [IVPCMap] Cálculo concluído com sucesso");
+      } catch (err) {
+        console.error("❌ Erro ao calcular buffers:", err);
+      }
     };
 
-    return {
-      type: "FeatureCollection",
-      features: [blindSpotGeometry],
-    };
-  };
-
-  // Criar GeoJSON da área monitorada
-  const createMonitoredVisualization = (): GeoJSON.FeatureCollection => {
-    if (!basinGeojson) {
-      return {
-        type: "FeatureCollection",
-        features: [],
-      };
-    }
-
-    const coordinates =
-      basinGeojson.type === "FeatureCollection"
-        ? basinGeojson.features[0]?.geometry?.coordinates ||
-          basinGeojson.coordinates
-        : basinGeojson.geometry?.coordinates || basinGeojson.coordinates;
-
-    const monitoredGeometry = {
-      type: "Feature",
-      geometry: {
-        type: "Polygon",
-        coordinates: coordinates,
-      },
-      properties: {
-        type: "monitored",
-        area_km2: metrics.urbanMonitoredArea,
-        percentage: 100 - metrics.blindSpotPercentage,
-      },
-    };
-
-    return {
-      type: "FeatureCollection",
-      features: [monitoredGeometry],
-    };
-  };
+    calculateBuffers();
+  }, [estacoes, basinGeojson, bufferRadius]);
 
   const toggleLayer = (layer: keyof LayerVisibility) => {
     setLayerVisibility((prev) => ({
@@ -147,9 +291,6 @@ export default function IVPCMap({
       [layer]: !prev[layer],
     }));
   };
-
-  const monitoredGeoJson = createMonitoredVisualization();
-  const blindSpotGeoJson = createBlindSpotVisualization();
 
   const estacaoIcon = new L.Icon({
     iconUrl:
@@ -162,37 +303,21 @@ export default function IVPCMap({
     shadowSize: [41, 41],
   });
 
-  // Calcular centro da bacia para inicializar o mapa
-  const getMapCenter = (): [number, number] => {
-    if (!basinGeojson) return [-15.8, -47.8]; // Centro do Brasil como fallback
-
-    try {
-      import("@turf/turf").then((turf) => {
-        const center = turf.center(basinGeojson);
-        return [center.geometry.coordinates[1], center.geometry.coordinates[0]];
-      });
-    } catch (err) {
-      console.error("Erro ao calcular centro:", err);
-    }
-
-    return [-15.8, -47.8];
-  };
-
   return (
     <div className="flex flex-col h-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Header com Legenda */}
       <div className="bg-slate-50 border-b border-slate-200 p-4">
         <h3 className="font-semibold text-slate-800 mb-3 text-sm">
-          Mapa de Vulnerabilidade Espacial (IVPC)
+          🗺️ Deficiência Operacional (Blind Spot = &gt; {bufferRadius}km)
         </h3>
 
         {/* Legend */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
           {/* Basin Boundary */}
           <button
             onClick={() => toggleLayer("basinBoundary")}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-            title="Toggle boundary layer"
+            title="Contorno da bacia"
           >
             {layerVisibility.basinBoundary ? (
               <Eye className="w-3 h-3 text-blue-600" />
@@ -207,14 +332,16 @@ export default function IVPCMap({
           <button
             onClick={() => toggleLayer("monitored")}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-            title="Toggle monitored areas"
+            title="Dentro de 10 km das estações"
           >
             {layerVisibility.monitored ? (
               <Eye className="w-3 h-3 text-green-600" />
             ) : (
               <EyeOff className="w-3 h-3 text-slate-400" />
             )}
-            <span className="font-medium text-slate-700">Monitorado</span>
+            <span className="font-medium text-slate-700 text-[11px]">
+              Monitorado
+            </span>
             <div className="w-3 h-3 rounded bg-green-400"></div>
           </button>
 
@@ -222,30 +349,51 @@ export default function IVPCMap({
           <button
             onClick={() => toggleLayer("blindSpot")}
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-            title="Toggle blind spot areas"
+            title="Sem cobertura (> 10 km)"
           >
             {layerVisibility.blindSpot ? (
               <Eye className="w-3 h-3 text-red-600" />
             ) : (
               <EyeOff className="w-3 h-3 text-slate-400" />
             )}
-            <span className="font-medium text-slate-700">Sem Monitoramento</span>
+            <span className="font-medium text-slate-700 text-[11px]">
+              Blind Spot
+            </span>
             <div className="w-3 h-3 rounded bg-orange-500"></div>
           </button>
+
+          {/* Buffers */}
+          {estacoes.length > 0 && (
+            <button
+              onClick={() => toggleLayer("buffers")}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+              title="Raios de cobertura de 10 km"
+            >
+              {layerVisibility.buffers ? (
+                <Eye className="w-3 h-3 text-emerald-600" />
+              ) : (
+                <EyeOff className="w-3 h-3 text-slate-400" />
+              )}
+              <span className="font-medium text-slate-700 text-[11px]">
+                Raios
+              </span>
+              <div className="w-3 h-3 rounded-full border-2 border-emerald-500"></div>
+            </button>
+          )}
 
           {/* Estações */}
           {estacoes.length > 0 && (
             <button
               onClick={() => toggleLayer("estacoes")}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-              title="Toggle monitoring stations"
+              title="Locais de estações hidrológicas"
             >
               {layerVisibility.estacoes ? (
                 <Eye className="w-3 h-3 text-indigo-600" />
               ) : (
                 <EyeOff className="w-3 h-3 text-slate-400" />
               )}
-              <span className="font-medium text-slate-700">
+              <span className="font-medium text-slate-700 text-[11px]">
                 Estações ({estacoes.length})
               </span>
               <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
@@ -257,17 +405,24 @@ export default function IVPCMap({
             <button
               onClick={() => toggleLayer("tileLayer")}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-              title="Toggle satellite/base layer"
+              title="Camada de satélite"
             >
               {layerVisibility.tileLayer ? (
                 <Eye className="w-3 h-3 text-amber-600" />
               ) : (
                 <EyeOff className="w-3 h-3 text-slate-400" />
               )}
-              <span className="font-medium text-slate-700">Imagem Satélite</span>
+              <span className="font-medium text-slate-700 text-[11px]">
+                Satélite
+              </span>
             </button>
           )}
         </div>
+
+        {/* Spec Reference */}
+        <p className="text-[10px] text-slate-500 mt-2 font-mono bg-slate-100 px-2 py-1 rounded">
+          IVPC Spec: Blind spot = distância &gt; {bufferRadius}km | Turf.js
+        </p>
       </div>
 
       {/* Mapa */}
@@ -290,7 +445,7 @@ export default function IVPCMap({
 
           {/* Basin Boundary */}
           {layerVisibility.basinBoundary && basinGeojson && (
-            <GeoJSON
+            <LeafletGeoJSON
               key="basin-boundary"
               data={basinGeojson}
               style={{
@@ -298,61 +453,94 @@ export default function IVPCMap({
                 weight: 3,
                 opacity: 0.8,
                 fillColor: "#dbeafe",
-                fillOpacity: 0.1,
+                fillOpacity: 0.05,
               }}
               onEachFeature={(feature, layer) => {
-                if (feature.properties) {
-                  layer.bindPopup(
-                    `<strong>Contorno da Bacia</strong><br/>Área: ${metrics.urbanEligibleArea.toFixed(2)} km²`
-                  );
-                }
+                layer.bindPopup(
+                  `<strong>📍 Contorno da Bacia</strong><br/>Área elegível: ${metrics.urbanEligibleArea.toFixed(
+                    2
+                  )} km²`
+                );
               }}
             />
           )}
 
-          {/* Monitored Areas - Green */}
-          {layerVisibility.monitored && monitoredGeoJson.features.length > 0 && (
-            <GeoJSON
-              key="monitored-areas"
-              data={monitoredGeoJson}
-              style={{
-                color: "#16a34a",
-                weight: 1,
-                opacity: 0.7,
-                fillColor: "#4ade80",
-                fillOpacity: 0.4,
-              }}
-              onEachFeature={(feature, layer) => {
-                if (feature.properties) {
+          {/* Monitored Areas - Green (Inside 10km Buffers) */}
+          {layerVisibility.monitored && monitoredGeoJson && (
+            <>
+              {console.log("🟢 [RENDER] Renderizando MONITORED GeoJSON:", {
+                features: monitoredGeoJson.features?.length,
+                type: monitoredGeoJson.type,
+                firstGeomType: monitoredGeoJson.features?.[0]?.geometry?.type,
+              })}
+              <LeafletGeoJSON
+                key="monitored-areas"
+                data={monitoredGeoJson}
+                style={{
+                  color: "#15803d",
+                  weight: 1,
+                  opacity: 0.7,
+                  fillColor: "#4ade80",
+                  fillOpacity: 0.5,
+                }}
+                onEachFeature={(feature, layer) => {
+                  console.log("🟢 [FEATURE] Feature renderizada em layer");
                   layer.bindPopup(
-                    `<strong>Área Monitorada</strong><br/>Área: ${metrics.urbanMonitoredArea.toFixed(2)} km²<br/>Cobertura: ${(100 - metrics.blindSpotPercentage).toFixed(1)}%`
+                    `<strong>✓ Área Monitorada</strong><br/>Dentro de ${bufferRadius}km de estação<br/>Cobertura operacional: ${(
+                      100 - metrics.blindSpotPercentage
+                    ).toFixed(1)}%`
                   );
-                }
-              }}
-            />
+                }}
+              />
+            </>
           )}
 
-          {/* Blind Spot Areas - Orange/Red */}
-          {layerVisibility.blindSpot && blindSpotGeoJson.features.length > 0 && (
-            <GeoJSON
-              key="blind-spot-areas"
-              data={blindSpotGeoJson}
-              style={{
-                color: "#dc2626",
-                weight: 1,
-                opacity: 0.8,
-                fillColor: "#f97316",
-                fillOpacity: 0.5,
-              }}
-              onEachFeature={(feature, layer) => {
-                if (feature.properties) {
+          {/* Blind Spot Areas - Orange/Red (Outside 10km Buffers) */}
+          {layerVisibility.blindSpot && blindSpotGeoJson && (
+            <>
+              {console.log("🟠 [RENDER] Renderizando BLIND SPOT GeoJSON:", {
+                features: blindSpotGeoJson.features?.length,
+                type: blindSpotGeoJson.type,
+                firstGeomType: blindSpotGeoJson.features?.[0]?.geometry?.type,
+              })}
+              <LeafletGeoJSON
+                key="blind-spot-areas"
+                data={blindSpotGeoJson}
+                style={{
+                  color: "#991b1b",
+                  weight: 1,
+                  opacity: 0.8,
+                  fillColor: "#f97316",
+                  fillOpacity: 0.6,
+                }}
+                onEachFeature={(feature, layer) => {
+                  console.log("🟠 [FEATURE] Feature de blind spot renderizada em layer");
                   layer.bindPopup(
-                    `<strong>Sem Monitoramento (Blind Spot)</strong><br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(1)}%<br/>Distância máx: ${metrics.maxDistanceKm.toFixed(1)} km`
+                    `<strong>⚠️ Deficiência Operacional (Blind Spot)</strong><br/>Distância > ${bufferRadius}km<br/>Deficiência: ${metrics.blindSpotPercentage.toFixed(
+                      1
+                    )}%<br/>Área: ${metrics.urbanBlindSpotArea.toFixed(2)} km²`
                   );
-                }
-              }}
-            />
+                }}
+              />
+            </>
           )}
+
+          {/* Buffer Circles - Visual Reference (10 km raios tracejados) */}
+          {layerVisibility.buffers &&
+            estacoes.map((est, idx) => (
+              <Circle
+                key={`buffer-${idx}`}
+                center={[est.latitude, est.longitude]}
+                radius={bufferRadius * 1000} // Converter km para metros
+                pathOptions={{
+                  color: "#10b981",
+                  weight: 2,
+                  opacity: 0.3,
+                  fill: false,
+                  dashArray: "5, 5",
+                }}
+              />
+            ))}
 
           {/* Estações de Monitoramento */}
           {layerVisibility.estacoes &&
@@ -363,12 +551,15 @@ export default function IVPCMap({
                 icon={estacaoIcon}
               >
                 <Popup className="text-sm">
-                  <div>
-                    <strong>{est.nome}</strong>
+                  <div className="w-48">
+                    <strong>📍 {est.nome}</strong>
                     <p className="text-xs text-slate-600 mt-1">
                       Código: {est.codigo}
                     </p>
                     <p className="text-xs text-slate-600">Tipo: {est.tipo}</p>
+                    <p className="text-xs text-emerald-600 mt-2 font-semibold">
+                      ✓ Raio de cobertura: {bufferRadius} km
+                    </p>
                   </div>
                 </Popup>
               </Marker>
@@ -382,27 +573,27 @@ export default function IVPCMap({
       {/* Stats Footer */}
       <div className="bg-slate-50 border-t border-slate-200 p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
         <div>
-          <p className="text-slate-500 font-medium mb-1">Área Total</p>
+          <p className="text-slate-500 font-medium mb-1">Área Elegível</p>
           <p className="text-slate-800 font-semibold">
             {metrics.urbanEligibleArea.toFixed(1)} km²
           </p>
         </div>
         <div>
-          <p className="text-slate-500 font-medium mb-1">Monitorada</p>
+          <p className="text-slate-500 font-medium mb-1">✓ Monitorada</p>
           <p className="text-green-700 font-semibold">
             {(100 - metrics.blindSpotPercentage).toFixed(1)}%
           </p>
         </div>
         <div>
-          <p className="text-slate-500 font-medium mb-1">Sem Monitoramento</p>
+          <p className="text-slate-500 font-medium mb-1">⚠️ Blind Spot</p>
           <p className="text-orange-700 font-semibold">
             {metrics.blindSpotPercentage.toFixed(1)}%
           </p>
         </div>
         <div>
-          <p className="text-slate-500 font-medium mb-1">Dist. Máxima</p>
+          <p className="text-slate-500 font-medium mb-1">📍 Estações</p>
           <p className="text-slate-800 font-semibold">
-            {metrics.maxDistanceKm.toFixed(1)} km
+            {estacoes.length} unidades
           </p>
         </div>
       </div>

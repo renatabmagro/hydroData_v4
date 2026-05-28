@@ -444,7 +444,7 @@ export default function ValidationPanel({
             </p>
 
             <p>
-              <strong>MUN:</strong> Verifica a disponibilidade dos dados urbanos, populacionais e de risco.
+              <strong>MUN:</strong> Verifica a disponibilidade dos dados urbanos, populacionais e de vulnerabilidade relativa.
             </p>
 
             <p>
