@@ -3,6 +3,7 @@ import { Database, Map as MapIcon, Download, CheckCircle, Loader2, Play, Layers,
 import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import * as L from 'leaflet';
 import { createClient } from '@supabase/supabase-js';
+import { searchBacias, getBaciaById } from './services/sqlDataLoader';
 
 const supabaseUrl = 'https://pnedbwdgcwlicitmfymz.supabase.co';
 const supabaseKey = 'sb_publishable_LsKJ_gxuDVpQbh-i5WndqQ_PPyh7cJm';
@@ -107,21 +108,8 @@ export default function App() {
     }
 
     const timer = setTimeout(async () => {
-      let query = supabase
-        .from('bacias_niveis')
-        .select('id, nome_bacia, nivel, codigo_bacia');
-        
-      if (selectedNivel !== 'Todos') {
-        query = query.eq('nivel', selectedNivel);
-      }
-      
-      const { data, error } = await query
-        .ilike('nome_bacia', `%${searchQuery}%`)
-        .limit(10);
-      
-      if (data) {
-        setSuggestions(data);
-      }
+      const data = await searchBacias(searchQuery, selectedNivel !== 'Todos' ? selectedNivel : undefined, 10);
+      setSuggestions(data);
     }, 300);
 
     return () => clearTimeout(timer);
@@ -253,15 +241,11 @@ export default function App() {
       return;
     }
     
-    const { data, error } = await supabase
-      .from('bacias_niveis')
-      .select('geojson_bacia, nome_bacia')
-      .eq('id', selectedCustomBacia.id)
-      .single();
+    const data = await getBaciaById(selectedCustomBacia.id);
       
-    if (error || !data) {
-      console.error("Supabase error fetching basin:", error);
-      setExtractionError(`Erro ao buscar geometria da bacia no Supabase: ${error?.message || 'Dados não encontrados'}`);
+    if (!data) {
+      console.error("Error fetching basin:", selectedCustomBacia.id);
+      setExtractionError(`Erro ao buscar geometria da bacia: Dados não encontrados`);
       setIsExtracting(false);
       return;
     }

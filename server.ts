@@ -16,6 +16,7 @@ import * as turf from '@turf/turf';
 import { XMLParser } from 'fast-xml-parser';
 import { GoogleGenAI } from '@google/genai';
 import {ensureEERuntime} from "./src/ee/runtime/eeRuntime";
+import { getAllMunicipios } from './src/services/sqlDataLoader';
 //import "dotenv/config";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -35,6 +36,9 @@ app.use((err: any, req: any, res: any, next: any) => {
   }
   next(err);
 });
+
+// Serve arquivos estáticos da pasta dados
+app.use('/dados', express.static(path.join(process.cwd(), 'dados')));
 
 // Supabase Client Configuration
 let supabase: any = null;
@@ -319,14 +323,8 @@ app.post("/api/extract", async (req, res) => {
                       }
                     }
                     
-                    const promises = [];
-                    for (let i = 0; i < 6; i++) {
-                      promises.push(getSupabase().from('municipios_dados')
-                        .select('code_muni, name_muni, abbrev_state, geojson_urbanizacao, geojson_risco')
-                        .range(i * 1000, i * 1000 + 999));
-                    }
-                    const results = await Promise.all(promises);
-                    const munData = results.flatMap(r => r.data || []);
+                    // Load municipios data from local SQL file
+                    const munData = await getAllMunicipios();
                     
                     const basinBbox = turf.bbox(basinPoly);
                     const urbFeatures: any[] = [];
